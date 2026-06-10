@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pai-driving-safety-etl"
+version = "0.1.0"
+description = "Practical AI CA1 driving safety ETL, data warehouse, and analytics artifacts."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Goh Kun Ming" }
+]
+keywords = [
+  "practical-ai",
+  "etl",
+  "data-warehouse",
+  "mysql",
+  "pyspark",
+  "powerbi",
+  "driving-safety"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Education",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12"
+]
+dependencies = []
+
+[project.optional-dependencies]
+etl = [
+  "mysql-connector-python>=8.0",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "PyMySQL>=1.1",
+  "pyspark>=3.5",
+  "scipy>=1.10",
+  "SQLAlchemy>=2.0"
+]
+dev = [
+  "pytest>=8.0"
+]
+
+[project.scripts]
+pai-pipeline = "pai_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra -m 'not integration'"
+testpaths = ["tests"]
+markers = [
+  "integration: tests that require live database services or external credentials"
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+extend-exclude = [
+  "notebooks",
+  "artifacts",
+  "vendor"
+]

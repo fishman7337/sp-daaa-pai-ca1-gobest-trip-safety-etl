@@ -1,0 +1,2 @@
+# Runtime dependencies for the full ETL pipeline.
+-e .[etl]

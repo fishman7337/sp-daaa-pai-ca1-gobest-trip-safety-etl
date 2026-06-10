@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "If you use this coursework repository as a reference, please cite it."
+title: "Practical AI CA1 Driving Safety ETL and Analytics"
+authors:
+  - family-names: "Goh"
+    given-names: "Kun Ming"
+date-released: "2026-06-10"
+license: "MIT"

@@ -40,6 +40,8 @@ from pyspark.ml.linalg import DenseVector, Vectors, Matrix, DenseMatrix
 import mysql.connector
 from pyspark.sql.types import StructType, StructField, IntegerType, StringType
 
+from pai_pipeline.sql import quote_identifier, sql_statement
+
 RANDOM_STATE = 42
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -89,6 +91,7 @@ db_host = os.getenv("MYSQL_STAGING_HOST")
 db_port = int(os.getenv("STAGING_DB_PORT"))
 db_name = os.getenv("STAGING_DB_NAME", "staging")
 db_table = os.getenv("STAGING_DB_TABLE", "drivers_source")
+quoted_db_table = quote_identifier(db_table)
 
 jdbc_url = f"jdbc:mysql://{db_host}:{db_port}/{db_name}"
 
@@ -113,12 +116,13 @@ num_exprs = [f"CAST({nullify_sql(c)} AS DOUBLE) AS `{c}`" for c in num_cols]
 
 select_cols = ",\n       ".join([id_expr] + cat_exprs + num_exprs + ["cleaned_date"])
 
-query = f"""
-SELECT
-       {select_cols}
-FROM `{db_table}`
-WHERE cleaned_date IS NULL
-"""
+query = sql_statement(
+    "SELECT",
+    select_cols,
+    "FROM",
+    quoted_db_table,
+    "WHERE cleaned_date IS NULL",
+)
 
 df_raw = (
     spark.read.format("jdbc")
@@ -955,11 +959,13 @@ if driver_ids:
     cursor = conn.cursor()
 
     placeholders = ", ".join(["%s"] * len(driver_ids))
-    sql = f"""
-        UPDATE {db_table}
-        SET cleaned_date = NOW()
-        WHERE driver_id IN ({placeholders})
-    """
+    sql = sql_statement(
+        "UPDATE",
+        quoted_db_table,
+        "SET cleaned_date = NOW()",
+        "WHERE driver_id IN",
+        f"({placeholders})",
+    )
 
     cursor.execute(sql, driver_ids)
     conn.commit()

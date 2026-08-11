@@ -17,6 +17,8 @@ python -m ruff check .
 python -m ruff format --check .
 python -m pytest
 python -m compileall src tests
+python -m bandit -q -r src -c pyproject.toml
+python -m pip_audit -r requirements.txt --progress-spinner off
 ```
 
 On Windows, activate a Python environment with `.venv\Scripts\Activate.ps1`; on POSIX shells use `source .venv/bin/activate`. The GitHub Actions workflow remains the authoritative cross-platform gate.

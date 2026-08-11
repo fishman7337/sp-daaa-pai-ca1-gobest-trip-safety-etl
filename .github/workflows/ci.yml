@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ["main", "master", "portfolio/**"]
   pull_request:
 
 permissions:
@@ -43,3 +43,9 @@ jobs:
 
       - name: Compile Python sources
         run: python -m compileall src tests scripts
+
+      - name: Run static security analysis
+        run: python -m bandit -q -r src -c pyproject.toml
+
+      - name: Audit runtime dependencies
+        run: python -m pip_audit -r requirements.txt --progress-spinner off

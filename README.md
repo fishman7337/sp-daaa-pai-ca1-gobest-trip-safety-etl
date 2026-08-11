@@ -141,6 +141,8 @@ Default tests are offline and safe for CI:
 ```bash
 python -m pytest
 python -m compileall src tests scripts
+python -m bandit -q -r src -c pyproject.toml
+python -m pip_audit -r requirements.txt --progress-spinner off
 ```
 
 Live database tests are deliberately opt-in:
@@ -149,8 +151,8 @@ Live database tests are deliberately opt-in:
 RUN_DB_TESTS=1 PAI_ENV_FILE=config/.env python -m pytest -m integration
 ```
 
-GitHub Actions runs the offline test suite and Python compile checks on push and
-pull request.
+GitHub Actions runs the offline test suite, Python compile checks, static
+security analysis, and a runtime dependency audit on push and pull request.
 
 ## SQL And Dashboard Artifacts
 

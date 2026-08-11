@@ -36,6 +36,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
 
+from pai_pipeline.sql import quote_identifier, sql_statement
+
 """
 Cell S0 — Environment Setup (Jupyter + PySpark)
 PEP 8, PEP 257, Google-Style Docstrings.
@@ -118,6 +120,7 @@ db_host = os.getenv("MYSQL_STAGING_HOST")
 db_port = int(os.getenv("STAGING_DB_PORT"))
 db_name = os.getenv("STAGING_DB_NAME", "staging")
 db_table = os.getenv("STAGING_DB_TABLE", "safety_labels_source")
+quoted_db_table = quote_identifier(db_table)
 
 # SQLAlchemy URL (if you still need it anywhere else)
 db_url = URL.create(
@@ -156,12 +159,13 @@ num_exprs = [f"CAST({nullify_sql(c)} AS DOUBLE) AS `{c}`" for c in num_cols]
 
 # build final SELECT, restricted to rows with cleaned_date IS NULL
 select_cols = ",\n       ".join([id_expr] + num_exprs)
-query = f"""
-SELECT
-       {select_cols}
-FROM `{db_table}`
-WHERE cleaned_date IS NULL
-"""
+query = sql_statement(
+    "SELECT",
+    select_cols,
+    "FROM",
+    quoted_db_table,
+    "WHERE cleaned_date IS NULL",
+)
 
 # -------- Spark JDBC read --------
 # Make sure the MySQL JDBC driver JAR is available to Spark.
@@ -903,10 +907,11 @@ Design
 # ---------------------
 # 0. Spark → pandas
 # ---------------------
-assert "sdf_clean" in globals(), (
-    "sdf_clean not found. Ensure the label-level Spark DataFrame is named "
-    "`sdf_clean` and built in previous cells."
-)
+if "sdf_clean" not in globals():
+    raise RuntimeError(
+        "sdf_clean not found. Ensure the label-level Spark DataFrame is named "
+        "`sdf_clean` and built in previous cells."
+    )
 
 # Expecting sdf_clean to contain at least:
 #   booking_id, driver_id, label
@@ -933,6 +938,9 @@ DW_DB = os.getenv("DW_DATABASE", "warehouse")  # target DW schema
 FACT_TABLE = "Fact_Label"
 DIM_DRIVER_TABLE = "Dim_Driver"
 DIM_SENSOR_TABLE = "Dim_Sensor"
+quoted_fact_table = quote_identifier(FACT_TABLE)
+quoted_dim_driver_table = quote_identifier(DIM_DRIVER_TABLE)
+quoted_dim_sensor_table = quote_identifier(DIM_SENSOR_TABLE)
 
 if not DW_URI_ENV:
     raise ValueError(
@@ -961,19 +969,15 @@ staging_engine = sa.create_engine(
 # ---------------------
 print("Loading Dim_Driver and Dim_Sensor for key lookup from DW...")
 
-sql_driver = f"""
-    SELECT
-        driver_key,
-        driver_id
-    FROM {DIM_DRIVER_TABLE};
-"""
+sql_driver = sql_statement(
+    "SELECT driver_key, driver_id FROM",
+    f"{quoted_dim_driver_table};",
+)
 
-sql_sensor = f"""
-    SELECT
-        sensor_key,
-        booking_id
-    FROM {DIM_SENSOR_TABLE};
-"""
+sql_sensor = sql_statement(
+    "SELECT sensor_key, booking_id FROM",
+    f"{quoted_dim_sensor_table};",
+)
 
 df_dim_driver = pd.read_sql(sql_driver, engine)
 df_dim_sensor = pd.read_sql(sql_sensor, engine)
@@ -1113,18 +1117,28 @@ print(df_fact.head(5))
 # ---------------------
 def get_row_count(engine: Engine, table: str) -> int:
     """Return row count for a table in the DW."""
+    quoted_table = quote_identifier(table)
     with engine.begin() as conn:
         return int(
-            conn.execute(sa.text(f"SELECT COUNT(*) FROM `{table}`;")).scalar() or 0
+            conn.execute(
+                sa.text(sql_statement("SELECT COUNT(*) FROM", f"{quoted_table};"))
+            ).scalar()
+            or 0
         )
 
 
 def get_max_label_key(engine: Engine, table: str) -> int:
     """Return MAX(label_key) for Fact_Label."""
+    quoted_table = quote_identifier(table)
     with engine.begin() as conn:
         return int(
             conn.execute(
-                sa.text(f"SELECT COALESCE(MAX(`label_key`), 0) FROM `{table}`;")
+                sa.text(
+                    sql_statement(
+                        "SELECT COALESCE(MAX(`label_key`), 0) FROM",
+                        f"{quoted_table};",
+                    )
+                )
             ).scalar()
             or 0
         )
@@ -1134,21 +1148,23 @@ rows_before = get_row_count(engine, FACT_TABLE)
 max_label_key_before = get_max_label_key(engine, FACT_TABLE)
 
 # ON DUPLICATE KEY UPDATE to respect uk_fact_label_booking (booking_id)
-insert_sql = f"""
-    INSERT INTO `{FACT_TABLE}` (
+insert_sql = sql_statement(
+    "INSERT INTO",
+    quoted_fact_table,
+    """(
         booking_id,
         driver_key,
         sensor_key,
         label,
         date_cleaned
-    )
-    VALUES (%s, %s, %s, %s, %s)
-    ON DUPLICATE KEY UPDATE
+    )""",
+    "VALUES (%s, %s, %s, %s, %s)",
+    """ON DUPLICATE KEY UPDATE
         driver_key   = VALUES(driver_key),
         sensor_key   = VALUES(sensor_key),
         label        = VALUES(label),
-        date_cleaned = VALUES(date_cleaned)
-"""
+        date_cleaned = VALUES(date_cleaned)""",
+)
 
 rows = list(
     df_fact[
@@ -1196,6 +1212,7 @@ print(
 # We only want to mark as cleaned the booking_ids we actually processed in this batch.
 
 STAGING_TABLE = "safety_labels_source"  # schema: staging.safety_source
+quoted_staging_table = quote_identifier(STAGING_TABLE)
 BOOKING_IDS = df_fact["booking_id"].dropna().astype(int).unique().tolist()
 
 if BOOKING_IDS:
@@ -1216,10 +1233,12 @@ if BOOKING_IDS:
         for i in range(0, len(BOOKING_IDS), chunk_size):
             chunk = BOOKING_IDS[i : i + chunk_size]
             placeholders = ", ".join(["%s"] * len(chunk))
-            sql = (
-                f"UPDATE `{STAGING_TABLE}` "
-                f"SET cleaned_date = NOW() "
-                f"WHERE booking_id IN ({placeholders})"
+            sql = sql_statement(
+                "UPDATE",
+                quoted_staging_table,
+                "SET cleaned_date = NOW()",
+                "WHERE booking_id IN",
+                f"({placeholders})",
             )
             cursor.execute(sql, chunk)
             total_updated += cursor.rowcount or 0

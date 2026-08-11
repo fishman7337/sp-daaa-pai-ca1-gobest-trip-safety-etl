@@ -6,7 +6,7 @@ from contextlib import closing
 from typing import Any
 
 from pai_pipeline.config import DatabaseConfig
-from pai_pipeline.sql import quote_identifier
+from pai_pipeline.sql import quote_identifier, sql_statement
 
 
 def count_uncleaned_rows(config: DatabaseConfig, table_name: str) -> int:
@@ -30,7 +30,11 @@ def count_uncleaned_rows(config: DatabaseConfig, table_name: str) -> int:
             quoted_table = quote_identifier(table_name)
             # DB-API parameters cannot represent identifiers; quote_identifier
             # escapes embedded delimiters before this trusted query is assembled.
-            query = f"SELECT COUNT(*) FROM {quoted_table} WHERE cleaned_date IS NULL;"  # noqa: E501  # nosec B608
+            query = sql_statement(
+                "SELECT COUNT(*) FROM",
+                quoted_table,
+                "WHERE cleaned_date IS NULL;",
+            )
             cursor.execute(query)
             row: Any = cursor.fetchone()
             return int(row[0])

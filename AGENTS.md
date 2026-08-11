@@ -44,6 +44,8 @@ python -m compileall src tests
 ```text
 python -m pai_pipeline list
 python -m pai_pipeline check-config
+python -m bandit -q -r src -c pyproject.toml
+python -m pip_audit -r requirements.txt --progress-spinner off
 ```
 
 Also run `git diff --check`. Record exactly which commands ran, their outcomes, and any documented prerequisite that prevented a check. Do not describe an unexecuted check as passing.

@@ -43,7 +43,9 @@ etl = [
   "SQLAlchemy>=2.0"
 ]
 dev = [
+  "bandit[toml]>=1.7",
   "nbformat>=5.10",
+  "pip-audit>=2.7",
   "pytest>=8.0",
   "ruff>=0.12.10"
 ]
@@ -81,3 +83,7 @@ select = ["D", "E", "F", "I"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = []

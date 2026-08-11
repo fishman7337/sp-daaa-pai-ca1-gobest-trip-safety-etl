@@ -37,6 +37,12 @@ from pyspark.sql import types as T
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 from pyspark.sql.window import Window
 
+from pai_pipeline.sql import (
+    quote_identifier,
+    quote_qualified_identifier,
+    sql_statement,
+)
+
 
 import logging
 
@@ -112,6 +118,7 @@ def run_pipeline():
     db_port = int(os.getenv("STAGING_DB_PORT"))
     db_name = os.getenv("STAGING_DB_NAME", "staging")
     db_table = os.getenv("STAGING_DB_TABLE", "sensor_data_source")
+    quoted_db_table = quote_identifier(db_table)
 
     # ---------- SQL query ----------
     SELECT_COLS = [
@@ -131,12 +138,13 @@ def run_pipeline():
     ]
     select_list = ", ".join(SELECT_COLS)
 
-    query = f"""
-    SELECT
-        {select_list}
-    FROM {db_table}
-    WHERE cleaned_date IS NULL
-    """
+    query = sql_statement(
+        "SELECT",
+        select_list,
+        "FROM",
+        quoted_db_table,
+        "WHERE cleaned_date IS NULL",
+    )
 
     print("Running SQL query against MySQL:\n", query)
 
@@ -1481,6 +1489,7 @@ def run_pipeline():
     DW_PORT = int(os.getenv("DW_PORT", db_port))
     DW_DB = os.getenv("DW_DB", "warehouse")
     DW_TABLE = os.getenv("DW_TABLE", "Dim_Sensor")  # must match your DW DDL
+    quoted_dw_table = quote_qualified_identifier(DW_DB, DW_TABLE)
 
     print(f"[C11] DW target: {DW_HOST}:{DW_PORT}/{DW_DB}.{DW_TABLE}")
 
@@ -1687,10 +1696,13 @@ def run_pipeline():
     placeholders = ", ".join(["%s"] * len(dw_cols))
     col_list = ", ".join(f"`{c}`" for c in dw_cols)
 
-    insert_sql = f"""
-        INSERT INTO {DW_DB}.{DW_TABLE} ({col_list})
-        VALUES ({placeholders})
-    """
+    insert_sql = sql_statement(
+        "INSERT INTO",
+        quoted_dw_table,
+        f"({col_list})",
+        "VALUES",
+        f"({placeholders})",
+    )
 
     # ---------------------------------------------------------------------
     # 6. Connect to DW and stream-insert in batches
@@ -1759,11 +1771,13 @@ def run_pipeline():
             chunk = booking_ids[i : i + chunk_size]
             placeholders = ", ".join(["%s"] * len(chunk))
 
-            sql = f"""
-                UPDATE {db_table}   -- sensor_data_source
-                SET cleaned_date = NOW()
-                WHERE booking_id IN ({placeholders})
-            """
+            sql = sql_statement(
+                "UPDATE",
+                quoted_db_table,
+                "SET cleaned_date = NOW()",
+                "WHERE booking_id IN",
+                f"({placeholders})",
+            )
 
             staging_cur.execute(sql, chunk)
             staging_conn.commit()
@@ -1775,8 +1789,10 @@ def run_pipeline():
         staging_cur.close()
         staging_conn.close()
         print(
-            f"[C11] Staging update complete — cleaned_date set for ~{total_updated} rows "
-            f"in '{db_table}'."
+            "[C11] Staging update complete — cleaned_date set for approximately",
+            total_updated,
+            "rows in",
+            repr(db_table),
         )
     else:
         print("[C11] No booking_ids collected — staging.cleaned_date not updated.")

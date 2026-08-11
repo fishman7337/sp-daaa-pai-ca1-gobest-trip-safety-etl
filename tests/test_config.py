@@ -36,9 +36,7 @@ def test_load_env_file_does_not_override_existing_values(
 ) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "EXISTING=from_file\n"
-        "NEW_VALUE='hello world'\n"
-        "export EXPORTED=yes\n",
+        "EXISTING=from_file\nNEW_VALUE='hello world'\nexport EXPORTED=yes\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("EXISTING", "from_os")
@@ -71,6 +69,6 @@ def test_database_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_mysql_jdbc_jar_path_defaults_to_vendor() -> None:
-    assert mysql_jdbc_jar_path().as_posix().endswith(
-        "vendor/mysql-connector-j-8.0.33.jar"
+    assert (
+        mysql_jdbc_jar_path().as_posix().endswith("vendor/mysql-connector-j-8.0.33.jar")
     )

@@ -7,11 +7,10 @@ validated, and free of committed credentials.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
-
 
 REQUIRED_STAGING_VARS = (
     "STAGING_DB_HOST",
@@ -31,13 +30,11 @@ REQUIRED_PIPELINE_VARS = (
 
 def project_root() -> Path:
     """Return the repository root based on the installed source layout."""
-
     return Path(__file__).resolve().parents[2]
 
 
 def default_env_paths() -> tuple[Path, ...]:
     """Return env file locations in priority order."""
-
     root = project_root()
     candidates = []
     explicit = os.getenv("PAI_ENV_FILE")
@@ -64,7 +61,6 @@ def load_env_file(path: str | os.PathLike[str] | None = None) -> Path | None:
     Returns:
         The path loaded, or ``None`` when no env file was found.
     """
-
     paths = [Path(path).expanduser()] if path else list(default_env_paths())
     for candidate in paths:
         if not candidate.is_file():
@@ -85,7 +81,6 @@ def load_env_file(path: str | os.PathLike[str] | None = None) -> Path | None:
 
 def _strip_inline_comment(value: str) -> str:
     """Remove unquoted inline comments from simple env values."""
-
     in_single = False
     in_double = False
     for index, char in enumerate(value):
@@ -98,16 +93,18 @@ def _strip_inline_comment(value: str) -> str:
     return value
 
 
-def missing_vars(names: Iterable[str], env: Mapping[str, str] | None = None) -> list[str]:
+def missing_vars(
+    names: Iterable[str], env: Mapping[str, str] | None = None
+) -> list[str]:
     """Return required variable names that are absent or blank."""
-
     source = env if env is not None else os.environ
     return [name for name in names if not source.get(name)]
 
 
-def int_env(name: str, default: int | None = None, env: Mapping[str, str] | None = None) -> int:
+def int_env(
+    name: str, default: int | None = None, env: Mapping[str, str] | None = None
+) -> int:
     """Read an integer environment variable with a clear error message."""
-
     source = env if env is not None else os.environ
     raw_value = source.get(name)
     if raw_value in (None, ""):
@@ -133,7 +130,6 @@ class DatabaseConfig:
     @classmethod
     def from_env(cls, prefix: str, default_database: str) -> "DatabaseConfig":
         """Build settings from ``<PREFIX>_DB_*`` style environment variables."""
-
         return cls(
             host=os.environ[f"{prefix}_DB_HOST"],
             port=int_env(f"{prefix}_DB_PORT"),
@@ -144,13 +140,11 @@ class DatabaseConfig:
 
     def jdbc_url(self) -> str:
         """Return a Spark JDBC URL for this database."""
-
         return f"jdbc:mysql://{self.host}:{self.port}/{self.database}"
 
 
 def mysql_jdbc_jar_path() -> Path:
     """Return the MySQL Connector/J path used by Spark JDBC jobs."""
-
     explicit = os.getenv("PAI_MYSQL_JDBC_JAR")
     if explicit:
         return Path(explicit).expanduser()

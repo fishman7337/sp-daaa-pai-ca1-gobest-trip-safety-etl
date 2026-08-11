@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import subprocess
+# Subprocess execution is required for repository-owned ETL scripts.
+import subprocess  # nosec B404
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -23,7 +24,6 @@ class PipelineSpec:
 
 def pipeline_specs() -> dict[str, PipelineSpec]:
     """Return the available ETL jobs keyed by CLI name."""
-
     root = project_root()
     pipeline_dir = root / "src" / "pai_pipeline" / "pipelines"
     return {
@@ -47,7 +47,6 @@ def pipeline_specs() -> dict[str, PipelineSpec]:
 
 def selected_specs(selection: str) -> list[PipelineSpec]:
     """Resolve a single pipeline name or ``all`` into ordered specs."""
-
     specs = pipeline_specs()
     if selection == "all":
         return [specs["sensor"], specs["driver"], specs["safety"]]
@@ -64,12 +63,17 @@ def run_pipeline(
     dry_run: bool = False,
 ) -> int:
     """Run one pipeline script and return its process exit code."""
-
     command = [python_executable, str(spec.script_path)]
     if dry_run:
         print("DRY RUN:", " ".join(command))
         return 0
-    completed = subprocess.run(command, cwd=project_root(), check=False)
+    # Both the interpreter and script path are supplied by trusted application code.
+    completed = subprocess.run(  # nosec B603
+        command,
+        cwd=project_root(),
+        check=False,
+        shell=False,
+    )
     return completed.returncode
 
 
@@ -81,7 +85,6 @@ def run_selected(
     dry_run: bool = False,
 ) -> int:
     """Run selected pipeline scripts, optionally skipping empty source tables."""
-
     for spec in specs:
         if staging_config and not skip_counts:
             pending_rows = count_uncleaned_rows(staging_config, spec.source_table)

@@ -5,14 +5,21 @@ import pytest
 pytestmark = pytest.mark.integration
 
 if os.getenv("RUN_DB_TESTS") != "1":
-    pytest.skip("Set RUN_DB_TESTS=1 to run live database checks.", allow_module_level=True)
+    pytest.skip(
+        "Set RUN_DB_TESTS=1 to run live database checks.", allow_module_level=True
+    )
 
 pymysql = pytest.importorskip("pymysql")
 
 # Fail early if required credentials are missing
-_missing_required = [var for var in ("MYSQL_USER", "MYSQL_PASSWORD") if not os.getenv(var)]
+_missing_required = [
+    var for var in ("MYSQL_USER", "MYSQL_PASSWORD") if not os.getenv(var)
+]
 if _missing_required:
-    pytest.skip(f"Missing required env vars: {', '.join(_missing_required)}", allow_module_level=True)
+    pytest.skip(
+        f"Missing required env vars: {', '.join(_missing_required)}",
+        allow_module_level=True,
+    )
 
 
 def _connection_params():
@@ -23,12 +30,20 @@ def _connection_params():
     warehouse_host = os.getenv("MYSQL_WAREHOUSE_HOST")
 
     if staging_host:
-        params.append(("STAGING", staging_host, os.getenv("MYSQL_STAGING_DB", "staging")))
+        params.append(
+            ("STAGING", staging_host, os.getenv("MYSQL_STAGING_DB", "staging"))
+        )
     if warehouse_host:
-        params.append(("WAREHOUSE", warehouse_host, os.getenv("MYSQL_WAREHOUSE_DB", "warehouse")))
+        params.append(
+            ("WAREHOUSE", warehouse_host, os.getenv("MYSQL_WAREHOUSE_DB", "warehouse"))
+        )
 
     if not params:
-        pytest.skip("No database hosts configured (set MYSQL_STAGING_HOST and/or MYSQL_WAREHOUSE_HOST).", allow_module_level=True)
+        pytest.skip(
+            "No database hosts configured "
+            "(set MYSQL_STAGING_HOST and/or MYSQL_WAREHOUSE_HOST).",
+            allow_module_level=True,
+        )
 
     return params
 

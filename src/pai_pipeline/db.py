@@ -6,6 +6,7 @@ from contextlib import closing
 from typing import Any
 
 from pai_pipeline.config import DatabaseConfig
+from pai_pipeline.sql import quote_identifier
 
 
 def count_uncleaned_rows(config: DatabaseConfig, table_name: str) -> int:
@@ -14,7 +15,6 @@ def count_uncleaned_rows(config: DatabaseConfig, table_name: str) -> int:
     The import is intentionally local so offline tests and CI do not need the
     MySQL client dependency unless this integration helper is used.
     """
-
     import pymysql
 
     with closing(
@@ -27,16 +27,17 @@ def count_uncleaned_rows(config: DatabaseConfig, table_name: str) -> int:
         )
     ) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(
-                f"SELECT COUNT(*) FROM `{table_name}` WHERE cleaned_date IS NULL;"
-            )
+            quoted_table = quote_identifier(table_name)
+            # DB-API parameters cannot represent identifiers; quote_identifier
+            # escapes embedded delimiters before this trusted query is assembled.
+            query = f"SELECT COUNT(*) FROM {quoted_table} WHERE cleaned_date IS NULL;"  # noqa: E501  # nosec B608
+            cursor.execute(query)
             row: Any = cursor.fetchone()
             return int(row[0])
 
 
 def select_one(config: DatabaseConfig) -> tuple[Any, ...] | None:
     """Execute ``SELECT 1`` against a configured MySQL database."""
-
     import pymysql
 
     with closing(

@@ -12,6 +12,15 @@ Suggested topics: `practical-ai`, `etl`, `data-warehouse`, `mysql`, `pyspark`,
 `powerbi`, `jupyter-notebook`, `driving-safety`, `data-cleaning`,
 `star-schema`.
 
+## Evidence and interpretation
+
+| Evidence-backed measure | Current repository evidence |
+| --- | --- |
+| Outlier methods | Sensor cleaning implements IQR rules and PCA-reconstruction diagnostics. |
+| Warehouse outcome | Validated staging data is transformed into a documented dimensional/star schema for Power BI consumption. |
+
+The qualitative outcome is a reproducible driver-safety ETL and analytics pipeline with validation, feature engineering, warehouse SQL, and offline tests. No row-count, throughput, Z-score, dashboard-adoption, or safety-impact claim is made without a pinned run artifact.
+
 ## Overview
 
 This repository contains the cleaned-up submission package for the ST1508

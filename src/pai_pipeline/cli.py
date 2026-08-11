@@ -17,7 +17,6 @@ from pai_pipeline.runner import run_selected, selected_specs
 
 def build_parser() -> argparse.ArgumentParser:
     """Create the top-level CLI parser."""
-
     parser = argparse.ArgumentParser(prog="pai-pipeline")
     parser.add_argument(
         "--env-file",
@@ -65,7 +64,6 @@ def _check_config(strict: bool) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
-
     parser = build_parser()
     args = parser.parse_args(argv)
     loaded_path = load_env_file(args.env_file)

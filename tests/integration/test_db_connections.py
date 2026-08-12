@@ -5,13 +5,18 @@ import pytest
 pytestmark = pytest.mark.integration
 
 if os.getenv("RUN_DB_TESTS") != "1":
-    pytest.skip("Set RUN_DB_TESTS=1 to run live database checks.", allow_module_level=True)
+    pytest.skip(
+        "Set RUN_DB_TESTS=1 to run live database checks.", allow_module_level=True
+    )
 
 pymysql = pytest.importorskip("pymysql")
 
 _missing_creds = [var for var in ("MYSQL_USER", "MYSQL_PASSWORD") if not os.getenv(var)]
 if _missing_creds:
-    pytest.skip(f"Missing required credentials: {', '.join(_missing_creds)}", allow_module_level=True)
+    pytest.skip(
+        f"Missing required credentials: {', '.join(_missing_creds)}",
+        allow_module_level=True,
+    )
 
 
 def _port(preferred_var):
@@ -47,7 +52,8 @@ def _targets():
 
     if not targets:
         pytest.skip(
-            "No DB hosts configured (set MYSQL_STAGING_HOST and/or MYSQL_WAREHOUSE_HOST).",
+            "No DB hosts configured "
+            "(set MYSQL_STAGING_HOST and/or MYSQL_WAREHOUSE_HOST).",
             allow_module_level=True,
         )
 

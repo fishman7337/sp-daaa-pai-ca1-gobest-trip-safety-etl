@@ -12,6 +12,15 @@ Suggested topics: `practical-ai`, `etl`, `data-warehouse`, `mysql`, `pyspark`,
 `powerbi`, `jupyter-notebook`, `driving-safety`, `data-cleaning`,
 `star-schema`.
 
+## Evidence and interpretation
+
+| Evidence-backed measure | Current repository evidence |
+| --- | --- |
+| Outlier methods | Sensor cleaning implements IQR rules and PCA-reconstruction diagnostics. |
+| Warehouse outcome | Validated staging data is transformed into a documented dimensional/star schema for Power BI consumption. |
+
+The qualitative outcome is a reproducible driver-safety ETL and analytics pipeline with validation, feature engineering, warehouse SQL, and offline tests. No row-count, throughput, Z-score, dashboard-adoption, or safety-impact claim is made without a pinned run artifact.
+
 ## Overview
 
 This repository contains the cleaned-up submission package for the ST1508
@@ -132,6 +141,8 @@ Default tests are offline and safe for CI:
 ```bash
 python -m pytest
 python -m compileall src tests scripts
+python -m bandit -q -r src -c pyproject.toml
+python -m pip_audit -r requirements.txt --progress-spinner off
 ```
 
 Live database tests are deliberately opt-in:
@@ -140,8 +151,8 @@ Live database tests are deliberately opt-in:
 RUN_DB_TESTS=1 PAI_ENV_FILE=config/.env python -m pytest -m integration
 ```
 
-GitHub Actions runs the offline test suite and Python compile checks on push and
-pull request.
+GitHub Actions runs the offline test suite, Python compile checks, static
+security analysis, and a runtime dependency audit on push and pull request.
 
 ## SQL And Dashboard Artifacts
 

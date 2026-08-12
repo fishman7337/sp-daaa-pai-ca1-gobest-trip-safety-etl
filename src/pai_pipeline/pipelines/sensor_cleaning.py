@@ -2,7 +2,7 @@
 
 # -*- coding: utf-8 -*-
 
-"""PAI Sensor ETL Pipeline
+"""Run the PAI sensor ETL pipeline.
 
 Auto-generated from notebook: PAI_Data_Cleaning_(Sensor) (3).ipynb
 
@@ -24,7 +24,6 @@ Generated: 2025-12-02T10:00:54
 
 # Note: label field from joined datasets is handled downstream when enriching sensor data.
 
-
 import gc
 import os
 from typing import Dict, List
@@ -38,16 +37,19 @@ from pyspark.sql import types as T
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 from pyspark.sql.window import Window
 
+from pai_pipeline.sql import (
+    quote_identifier,
+    quote_qualified_identifier,
+    sql_statement,
+)
 
 
 import logging
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
 logger = logging.getLogger("pai_sensor_pipeline")
-
 
 
 def run_pipeline():
@@ -70,17 +72,15 @@ def run_pipeline():
     """
 
     # 2) Kill any old Spark session just in case
-    try:
-        spark.stop()
-    except Exception:
-        pass
+    active_spark = SparkSession.getActiveSession()
+    if active_spark is not None:
+        active_spark.stop()
 
     gc.collect()
 
     # 3) Start fresh Spark (Colab already has PySpark installed)
     spark = (
-        SparkSession.builder
-        .appName("PAI_CA1_Sensor_Cleaning")
+        SparkSession.builder.appName("PAI_CA1_Sensor_Cleaning")
         .master("local[*]")
         .config("spark.driver.memory", "8g")
         .getOrCreate()
@@ -118,6 +118,7 @@ def run_pipeline():
     db_port = int(os.getenv("STAGING_DB_PORT"))
     db_name = os.getenv("STAGING_DB_NAME", "staging")
     db_table = os.getenv("STAGING_DB_TABLE", "sensor_data_source")
+    quoted_db_table = quote_identifier(db_table)
 
     # ---------- SQL query ----------
     SELECT_COLS = [
@@ -125,19 +126,25 @@ def run_pipeline():
         "booking_id",
         "accuracy",
         "bearing",
-        "acceleration_x", "acceleration_y", "acceleration_z",
-        "gyro_x", "gyro_y", "gyro_z",
-        "`second`", "speed",
+        "acceleration_x",
+        "acceleration_y",
+        "acceleration_z",
+        "gyro_x",
+        "gyro_y",
+        "gyro_z",
+        "`second`",
+        "speed",
         "cleaned_date",
     ]
     select_list = ", ".join(SELECT_COLS)
 
-    query = f"""
-    SELECT
-        {select_list}
-    FROM {db_table}
-    WHERE cleaned_date IS NULL
-    """
+    query = sql_statement(
+        "SELECT",
+        select_list,
+        "FROM",
+        quoted_db_table,
+        "WHERE cleaned_date IS NULL",
+    )
 
     print("Running SQL query against MySQL:\n", query)
 
@@ -160,14 +167,20 @@ def run_pipeline():
 
     # ---------- Fix pandas dtypes explicitly ----------
     NUMERIC_COLS = [
-        "accuracy", "bearing",
-        "acceleration_x", "acceleration_y", "acceleration_z",
-        "gyro_x", "gyro_y", "gyro_z",
-        "second", "speed",
+        "accuracy",
+        "bearing",
+        "acceleration_x",
+        "acceleration_y",
+        "acceleration_z",
+        "gyro_x",
+        "gyro_y",
+        "gyro_z",
+        "second",
+        "speed",
     ]
 
     # Make sure id-like columns stay as strings
-    pdf["csv_index"]  = pdf["csv_index"].astype(str)
+    pdf["csv_index"] = pdf["csv_index"].astype(str)
     pdf["booking_id"] = pdf["booking_id"].astype(str)
 
     for c in NUMERIC_COLS:
@@ -180,21 +193,23 @@ def run_pipeline():
     print(pdf.dtypes)
 
     # ---------- Define explicit Spark schema ----------
-    schema = StructType([
-        StructField("csv_index",      StringType(), True),
-        StructField("booking_id",     StringType(), True),
-        StructField("accuracy",       DoubleType(), True),
-        StructField("bearing",        DoubleType(), True),
-        StructField("acceleration_x", DoubleType(), True),
-        StructField("acceleration_y", DoubleType(), True),
-        StructField("acceleration_z", DoubleType(), True),
-        StructField("gyro_x",         DoubleType(), True),
-        StructField("gyro_y",         DoubleType(), True),
-        StructField("gyro_z",         DoubleType(), True),
-        StructField("second",         DoubleType(), True),
-        StructField("speed",          DoubleType(), True),
-        StructField("cleaned_date",   StringType(), True),
-    ])
+    schema = StructType(
+        [
+            StructField("csv_index", StringType(), True),
+            StructField("booking_id", StringType(), True),
+            StructField("accuracy", DoubleType(), True),
+            StructField("bearing", DoubleType(), True),
+            StructField("acceleration_x", DoubleType(), True),
+            StructField("acceleration_y", DoubleType(), True),
+            StructField("acceleration_z", DoubleType(), True),
+            StructField("gyro_x", DoubleType(), True),
+            StructField("gyro_y", DoubleType(), True),
+            StructField("gyro_z", DoubleType(), True),
+            StructField("second", DoubleType(), True),
+            StructField("speed", DoubleType(), True),
+            StructField("cleaned_date", StringType(), True),
+        ]
+    )
 
     # ---------- Convert pandas → Spark with schema ----------
     df_raw = spark.createDataFrame(pdf, schema=schema)
@@ -233,15 +248,13 @@ def run_pipeline():
     print(f"Audit size: {total_rows:,} rows, {len(cols)} columns")
 
     # 1) Missing values per column (on full df_raw)
-    missing_counts_df = df_audit.select([
-        F.count(F.when(F.col(c).isNull(), 1)).alias(c)
-        for c in cols
-    ])
+    missing_counts_df = df_audit.select(
+        [F.count(F.when(F.col(c).isNull(), 1)).alias(c) for c in cols]
+    )
 
     missing_profile_df = (
         missing_counts_df.toPandas()
-        .T
-        .reset_index()
+        .T.reset_index()
         .rename(columns={"index": "Column Name", 0: "Missing Count"})
     )
 
@@ -250,39 +263,31 @@ def run_pipeline():
     ).round(2)
 
     # 2) dtypes snapshot (from Spark)
-    dtypes_profile_df = (
-        spark.createDataFrame(
-            [(c, str(t)) for c, t in df_audit.dtypes],
-            schema=["Column Name", "Data Type"],
-        )
-        .toPandas()
-    )
+    dtypes_profile_df = spark.createDataFrame(
+        [(c, str(t)) for c, t in df_audit.dtypes],
+        schema=["Column Name", "Data Type"],
+    ).toPandas()
 
     # 3) Duplicate summary on the full df_raw (full-row equality)
     dup_count = total_rows - df_audit.dropDuplicates().count()
-    dup_percentage = (
-        round(dup_count / total_rows * 100, 4) if total_rows else 0.0
-    )
+    dup_percentage = round(dup_count / total_rows * 100, 4) if total_rows else 0.0
 
-    dup_summary_pdf = (
-        spark.createDataFrame(
-            [
-                (
-                    total_rows,
-                    dup_count,
-                    dup_percentage,
-                    "Duplicates Found" if dup_count > 0 else "No Duplicates",
-                )
-            ],
-            schema=[
-                "Total Rows",
-                "Duplicate Count",
-                "Duplicate Percentage",
-                "Status",
-            ],
-        )
-        .toPandas()
-    )
+    dup_summary_pdf = spark.createDataFrame(
+        [
+            (
+                total_rows,
+                dup_count,
+                dup_percentage,
+                "Duplicates Found" if dup_count > 0 else "No Duplicates",
+            )
+        ],
+        schema=[
+            "Total Rows",
+            "Duplicate Count",
+            "Duplicate Percentage",
+            "Status",
+        ],
+    ).toPandas()
 
     print(
         "Baseline Audit BEFORE Cleaning — "
@@ -307,7 +312,6 @@ def run_pipeline():
     - Preserves `csv_index` as a normal column (not part of the dedup key).
     - Returns df_dedup / df_clean_base for downstream cleaning steps.
     """
-
 
     # All columns in df_raw
     all_cols = df_raw.columns
@@ -358,15 +362,20 @@ def run_pipeline():
         Typed version of df_dedup with enforced schema.
     """
 
-
     # ------------------- Config: target schema -------------------
 
     ID_COL = "booking_id"
     NUM_COLS: List[str] = [
-        "accuracy", "bearing",
-        "acceleration_x", "acceleration_y", "acceleration_z",
-        "gyro_x", "gyro_y", "gyro_z",
-        "second", "speed",
+        "accuracy",
+        "bearing",
+        "acceleration_x",
+        "acceleration_y",
+        "acceleration_z",
+        "gyro_x",
+        "gyro_y",
+        "gyro_z",
+        "second",
+        "speed",
     ]
 
     # Only check columns that actually exist in df_dedup
@@ -374,10 +383,9 @@ def run_pipeline():
 
     # ------------------- 1) Null counts BEFORE casting -------------------
 
-    before_nulls_row = df_dedup.select([
-        F.count(F.when(F.col(c).isNull(), 1)).alias(c)
-        for c in cols_to_check
-    ]).collect()[0]
+    before_nulls_row = df_dedup.select(
+        [F.count(F.when(F.col(c).isNull(), 1)).alias(c) for c in cols_to_check]
+    ).collect()[0]
 
     before_nulls: Dict[str, int] = {c: int(before_nulls_row[c]) for c in cols_to_check}
 
@@ -399,10 +407,9 @@ def run_pipeline():
 
     # ------------------- 3) Null counts AFTER casting -------------------
 
-    after_nulls_row = df_cast.select([
-        F.count(F.when(F.col(c).isNull(), 1)).alias(c)
-        for c in cols_to_check
-    ]).collect()[0]
+    after_nulls_row = df_cast.select(
+        [F.count(F.when(F.col(c).isNull(), 1)).alias(c) for c in cols_to_check]
+    ).collect()[0]
 
     after_nulls: Dict[str, int] = {c: int(after_nulls_row[c]) for c in cols_to_check}
 
@@ -413,14 +420,16 @@ def run_pipeline():
 
     report_rows: List[Dict[str, object]] = []
     for c in cols_to_check:
-        report_rows.append({
-            "Column": c,
-            "From Type": schema_before.get(c, "N/A"),
-            "To Type": schema_after.get(c, "N/A"),
-            "New NULLs Added": after_nulls[c] - before_nulls[c],
-            "NULLs Before": before_nulls[c],
-            "NULLs After": after_nulls[c],
-        })
+        report_rows.append(
+            {
+                "Column": c,
+                "From Type": schema_before.get(c, "N/A"),
+                "To Type": schema_after.get(c, "N/A"),
+                "New NULLs Added": after_nulls[c] - before_nulls[c],
+                "NULLs Before": before_nulls[c],
+                "NULLs After": after_nulls[c],
+            }
+        )
 
     dtype_cast_report = pd.DataFrame(report_rows)
 
@@ -476,77 +485,67 @@ def run_pipeline():
 
     # ---- Accuracy invalid (< 0) -----------------------------------------------
     if "accuracy" in df_validated.columns:
-        df_validated = (
-            df_validated
-            .withColumn(
-                "accuracy_invalid",
-                F.when(
-                    (F.col("accuracy").isNotNull()) & (F.col("accuracy") < -EPS),
-                    F.lit(1),
-                ).otherwise(F.lit(0))
-            )
-            .withColumn(
-                "accuracy",
-                F.when(F.col("accuracy_invalid") == 1, F.lit(None)).otherwise(F.col("accuracy"))
-            )
+        df_validated = df_validated.withColumn(
+            "accuracy_invalid",
+            F.when(
+                (F.col("accuracy").isNotNull()) & (F.col("accuracy") < -EPS),
+                F.lit(1),
+            ).otherwise(F.lit(0)),
+        ).withColumn(
+            "accuracy",
+            F.when(F.col("accuracy_invalid") == 1, F.lit(None)).otherwise(
+                F.col("accuracy")
+            ),
         )
     else:
         df_validated = df_validated.withColumn("accuracy_invalid", F.lit(0))
 
     # ---- Bearing invalid (not in [0, 360]) ------------------------------------
     if "bearing" in df_validated.columns:
-        df_validated = (
-            df_validated
-            .withColumn(
-                "bearing_invalid",
-                F.when(
-                    (F.col("bearing").isNotNull()) &
-                    ((F.col("bearing") < 0 - EPS) | (F.col("bearing") > 360 + EPS)),
-                    F.lit(1),
-                ).otherwise(F.lit(0))
-            )
-            .withColumn(
-                "bearing",
-                F.when(F.col("bearing_invalid") == 1, F.lit(None)).otherwise(F.col("bearing"))
-            )
+        df_validated = df_validated.withColumn(
+            "bearing_invalid",
+            F.when(
+                (F.col("bearing").isNotNull())
+                & ((F.col("bearing") < 0 - EPS) | (F.col("bearing") > 360 + EPS)),
+                F.lit(1),
+            ).otherwise(F.lit(0)),
+        ).withColumn(
+            "bearing",
+            F.when(F.col("bearing_invalid") == 1, F.lit(None)).otherwise(
+                F.col("bearing")
+            ),
         )
     else:
         df_validated = df_validated.withColumn("bearing_invalid", F.lit(0))
 
     # ---- Speed invalid (< 0) --------------------------------------------------
     if "speed" in df_validated.columns:
-        df_validated = (
-            df_validated
-            .withColumn(
-                "speed_invalid",
-                F.when(
-                    (F.col("speed").isNotNull()) & (F.col("speed") < -EPS),
-                    F.lit(1),
-                ).otherwise(F.lit(0))
-            )
-            .withColumn(
-                "speed",
-                F.when(F.col("speed_invalid") == 1, F.lit(None)).otherwise(F.col("speed"))
-            )
+        df_validated = df_validated.withColumn(
+            "speed_invalid",
+            F.when(
+                (F.col("speed").isNotNull()) & (F.col("speed") < -EPS),
+                F.lit(1),
+            ).otherwise(F.lit(0)),
+        ).withColumn(
+            "speed",
+            F.when(F.col("speed_invalid") == 1, F.lit(None)).otherwise(F.col("speed")),
         )
     else:
         df_validated = df_validated.withColumn("speed_invalid", F.lit(0))
 
     # ---- Second invalid (< 0) -------------------------------------------------
     if "second" in df_validated.columns:
-        df_validated = (
-            df_validated
-            .withColumn(
-                "second_invalid",
-                F.when(
-                    (F.col("second").isNotNull()) & (F.col("second") < -EPS),
-                    F.lit(1),
-                ).otherwise(F.lit(0))
-            )
-            .withColumn(
-                "second",
-                F.when(F.col("second_invalid") == 1, F.lit(None)).otherwise(F.col("second"))
-            )
+        df_validated = df_validated.withColumn(
+            "second_invalid",
+            F.when(
+                (F.col("second").isNotNull()) & (F.col("second") < -EPS),
+                F.lit(1),
+            ).otherwise(F.lit(0)),
+        ).withColumn(
+            "second",
+            F.when(F.col("second_invalid") == 1, F.lit(None)).otherwise(
+                F.col("second")
+            ),
         )
     else:
         df_validated = df_validated.withColumn("second_invalid", F.lit(0))
@@ -560,7 +559,7 @@ def run_pipeline():
             + F.col("speed_invalid")
             + F.col("second_invalid")
             > 0
-        ).cast("int")
+        ).cast("int"),
     )
 
     # ---- Summaries ------------------------------------------------------------
@@ -604,12 +603,17 @@ def run_pipeline():
         Pruned DataFrame ready for imputation.
     """
 
-
     numeric_cols = [
-        "accuracy", "bearing",
-        "acceleration_x", "acceleration_y", "acceleration_z",
-        "gyro_x", "gyro_y", "gyro_z",
-        "second", "speed",
+        "accuracy",
+        "bearing",
+        "acceleration_x",
+        "acceleration_y",
+        "acceleration_z",
+        "gyro_x",
+        "gyro_y",
+        "gyro_z",
+        "second",
+        "speed",
     ]
 
     df_prep = df_validated
@@ -663,7 +667,8 @@ def run_pipeline():
 
     # 1) Detect numeric columns eligible for imputation
     numeric_present = [
-        c for c, t in df_prep.dtypes
+        c
+        for c, t in df_prep.dtypes
         if t in ("double", "float", "int", "bigint") and c != "booking_id"
     ]
 
@@ -683,10 +688,8 @@ def run_pipeline():
 
         # 4) Replace original numeric columns with their imputed versions
         for c in numeric_present:
-            df_imputed_tmp = (
-                df_imputed_tmp
-                .drop(c)
-                .withColumnRenamed(f"{c}__imputed", c)
+            df_imputed_tmp = df_imputed_tmp.drop(c).withColumnRenamed(
+                f"{c}__imputed", c
             )
     else:
         print("No numeric columns detected for imputation. Skipping Imputer step.")
@@ -697,10 +700,9 @@ def run_pipeline():
 
     # 6) Quick sanity check: remaining NULLs per column
     print("Imputation complete. Remaining NULLs per column:")
-    df_imputed.select([
-        F.count(F.when(F.col(c).isNull(), 1)).alias(c)
-        for c in df_imputed.columns
-    ]).show(truncate=False)
+    df_imputed.select(
+        [F.count(F.when(F.col(c).isNull(), 1)).alias(c) for c in df_imputed.columns]
+    ).show(truncate=False)
 
     """
     Cell C7 — Univariate Outlier Flagging (Spark, IQR)
@@ -722,7 +724,8 @@ def run_pipeline():
 
     # 1) Identify numeric columns (exclude booking_id)
     numeric_for_uni = [
-        c for c, t in df_imputed.dtypes
+        c
+        for c, t in df_imputed.dtypes
         if t in ("double", "float", "int", "bigint") and c != "booking_id"
     ]
 
@@ -750,8 +753,7 @@ def run_pipeline():
 
         flag_col_name = f"{c}__is_uni_outlier"
         flag_expr = F.when(
-            (F.col(c) < lower) | (F.col(c) > upper),
-            F.lit(True)
+            (F.col(c) < lower) | (F.col(c) > upper), F.lit(True)
         ).otherwise(F.lit(False))
 
         df_uni = df_uni.withColumn(flag_col_name, flag_expr)
@@ -803,7 +805,8 @@ def run_pipeline():
 
     # 0) Select numeric columns for multivariate detection
     numeric_mv = [
-        c for c, t in df_uni_flagged.dtypes
+        c
+        for c, t in df_uni_flagged.dtypes
         if t in ("double", "float", "int", "bigint") and c != "booking_id"
     ]
 
@@ -811,12 +814,12 @@ def run_pipeline():
 
     if not numeric_mv:
         # No numeric features → nothing to do
-        df_clean = (
-            df_uni_flagged
-            .withColumn("_mv_score", F.lit(0.0))
-            .withColumn("_mv_is_outlier", F.lit(False))
+        df_clean = df_uni_flagged.withColumn("_mv_score", F.lit(0.0)).withColumn(
+            "_mv_is_outlier", F.lit(False)
         )
-        print("No numeric columns for MV detection; `_mv_score` set to 0, no MV outliers flagged.")
+        print(
+            "No numeric columns for MV detection; `_mv_score` set to 0, no MV outliers flagged."
+        )
     else:
         # 1) Build feature vector
         assembler = VectorAssembler(
@@ -842,10 +845,8 @@ def run_pipeline():
 
         if k == 0:
             # Degenerate case: only 1 numeric col or similar
-            df_tmp = (
-                df_scaled
-                .withColumn("_mv_score", F.lit(0.0))
-                .withColumn("_mv_is_outlier", F.lit(False))
+            df_tmp = df_scaled.withColumn("_mv_score", F.lit(0.0)).withColumn(
+                "_mv_is_outlier", F.lit(False)
             )
             # Clean temp vector columns if they exist
             for tmp_col in ["features", "features_scaled"]:
@@ -871,9 +872,14 @@ def run_pipeline():
 
             @F.udf(T.DoubleType())
             def recon_error(x_scaled, z):
-                """
-                Compute squared reconstruction error ||x_scaled - x_hat||^2
-                in scaled feature space using PCA components.
+                """Compute squared PCA reconstruction error in scaled feature space.
+
+                Args:
+                    x_scaled: Scaled sensor feature vector.
+                    z: PCA-coordinate vector for the same observation.
+
+                Returns:
+                    Squared reconstruction error, or ``None`` for missing vectors.
                 """
                 if x_scaled is None or z is None:
                     return None
@@ -923,12 +929,15 @@ def run_pipeline():
 
             if min_s is None or max_s is None:
                 # All scores NULL? Fallback: no MV signal
-                df_tmp = (
-                    df_scored
-                    .withColumn("_mv_score", F.lit(0.0))
-                    .withColumn("_mv_is_outlier", F.lit(False))
+                df_tmp = df_scored.withColumn("_mv_score", F.lit(0.0)).withColumn(
+                    "_mv_is_outlier", F.lit(False)
                 )
-                for tmp_col in ["features", "features_scaled", "pca_features", "_mv_score_raw"]:
+                for tmp_col in [
+                    "features",
+                    "features_scaled",
+                    "pca_features",
+                    "_mv_score_raw",
+                ]:
                     if tmp_col in df_tmp.columns:
                         df_tmp = df_tmp.drop(tmp_col)
                 df_clean = df_tmp
@@ -956,15 +965,17 @@ def run_pipeline():
                 )[0]
 
                 # 7) Flag MV outliers and clean temp columns
-                df_tmp = (
-                    df_scored
-                    .withColumn(
-                        "_mv_is_outlier",
-                        (F.col("_mv_score_raw") >= F.lit(thr)).cast("boolean"),
-                    )
+                df_tmp = df_scored.withColumn(
+                    "_mv_is_outlier",
+                    (F.col("_mv_score_raw") >= F.lit(thr)).cast("boolean"),
                 )
 
-                for tmp_col in ["features", "features_scaled", "pca_features", "_mv_score_raw"]:
+                for tmp_col in [
+                    "features",
+                    "features_scaled",
+                    "pca_features",
+                    "_mv_score_raw",
+                ]:
                     if tmp_col in df_tmp.columns:
                         df_tmp = df_tmp.drop(tmp_col)
 
@@ -997,7 +1008,6 @@ def run_pipeline():
     dfc : Spark DataFrame
         Sanitised working DataFrame for downstream feature engineering.
     """
-
 
     # Start from the cleaned DF from previous step
     dfc = df_clean
@@ -1041,22 +1051,18 @@ def run_pipeline():
             F.col("acceleration_x") ** 2
             + F.col("acceleration_y") ** 2
             + F.col("acceleration_z") ** 2
-        )
+        ),
     )
 
     dfc = dfc.withColumn(
         "gyro_magnitude",
-        F.sqrt(
-            F.col("gyro_x") ** 2
-            + F.col("gyro_y") ** 2
-            + F.col("gyro_z") ** 2
-        )
+        F.sqrt(F.col("gyro_x") ** 2 + F.col("gyro_y") ** 2 + F.col("gyro_z") ** 2),
     )
 
     print("Cell F1 complete — added acc_magnitude and gyro_magnitude.")
-    dfc.select(
-        "booking_id", "second", "acc_magnitude", "gyro_magnitude"
-    ).show(10, truncate=False)
+    dfc.select("booking_id", "second", "acc_magnitude", "gyro_magnitude").show(
+        10, truncate=False
+    )
 
     """
     Cell F2 — Time-Derivative & Turning Signals (PySpark)
@@ -1073,53 +1079,54 @@ def run_pipeline():
         - turn_rate_deg_s   = bearing_diff_deg / delta_t
     """
 
-
     w_trip_time = Window.partitionBy("booking_id").orderBy("second")
 
     # Δspeed and Δt
     dfc = dfc.withColumn(
-        "delta_speed",
-        F.col("speed") - F.lag("speed").over(w_trip_time)
-    ).withColumn(
-        "delta_t",
-        F.col("second") - F.lag("second").over(w_trip_time)
-    )
+        "delta_speed", F.col("speed") - F.lag("speed").over(w_trip_time)
+    ).withColumn("delta_t", F.col("second") - F.lag("second").over(w_trip_time))
 
     # Speed change rate |Δv| / Δt
     dfc = dfc.withColumn(
         "speed_change_rate",
-        F.when(F.col("delta_t") > 0, F.abs(F.col("delta_speed") / F.col("delta_t")))
+        F.when(F.col("delta_t") > 0, F.abs(F.col("delta_speed") / F.col("delta_t"))),
     )
 
     # Jerk from acceleration magnitude: |Δacc_magnitude| / Δt
     dfc = dfc.withColumn(
-        "delta_accm",
-        F.col("acc_magnitude") - F.lag("acc_magnitude").over(w_trip_time)
+        "delta_accm", F.col("acc_magnitude") - F.lag("acc_magnitude").over(w_trip_time)
     ).withColumn(
         "jerk",
-        F.when(F.col("delta_t") > 0, F.abs(F.col("delta_accm") / F.col("delta_t")))
+        F.when(F.col("delta_t") > 0, F.abs(F.col("delta_accm") / F.col("delta_t"))),
     )
 
     # Bearing-based turning:
     # Use minimal angle difference to approximate unwrapped heading changes.
     dfc = dfc.withColumn(
-        "bearing_diff_raw",
-        F.abs(F.col("bearing") - F.lag("bearing").over(w_trip_time))
+        "bearing_diff_raw", F.abs(F.col("bearing") - F.lag("bearing").over(w_trip_time))
     ).withColumn(
         "bearing_diff_deg",
-        F.when(F.col("bearing_diff_raw") > 180, 360 - F.col("bearing_diff_raw"))
-         .otherwise(F.col("bearing_diff_raw"))
+        F.when(
+            F.col("bearing_diff_raw") > 180, 360 - F.col("bearing_diff_raw")
+        ).otherwise(F.col("bearing_diff_raw")),
     )
 
     dfc = dfc.withColumn(
         "turn_rate_deg_s",
-        F.when(F.col("delta_t") > 0, F.col("bearing_diff_deg") / F.col("delta_t"))
+        F.when(F.col("delta_t") > 0, F.col("bearing_diff_deg") / F.col("delta_t")),
     )
 
     print("Cell F2 complete — added time-derivative and turning signals.")
     dfc.select(
-        "booking_id", "second", "speed", "delta_speed", "delta_t",
-        "speed_change_rate", "jerk", "bearing_diff_deg", "turn_rate_deg_s"
+        "booking_id",
+        "second",
+        "speed",
+        "delta_speed",
+        "delta_t",
+        "speed_change_rate",
+        "jerk",
+        "bearing_diff_deg",
+        "turn_rate_deg_s",
     ).show(10, truncate=False)
 
     """
@@ -1161,27 +1168,25 @@ def run_pipeline():
         - FE_gps_acc_mean, FE_gps_acc_std
     """
 
-
     # Core per-trip aggregates (1 row per booking_id)
     trip_aggs = dfc.groupBy("booking_id").agg(
         # Meta
         F.count(F.lit(1)).alias("FE_n_samples"),
         (F.max("second") - F.min("second")).alias("FE_trip_duration_s"),
-
         # Speed behaviour
         F.avg("speed").alias("FE_speed_mean"),
         F.stddev_pop("speed").alias("FE_speed_std"),
         F.max("speed").alias("FE_speed_max"),
         F.min("speed").alias("FE_speed_min"),
         F.expr("percentile_approx(speed, 0.90)").alias("FE_speed_p90"),
-        F.expr("percentile_approx(speed_change_rate, 0.50)").alias("FE_speed_change_rate_med"),
-
+        F.expr("percentile_approx(speed_change_rate, 0.50)").alias(
+            "FE_speed_change_rate_med"
+        ),
         # Acceleration magnitude
         F.avg("acc_magnitude").alias("FE_acc_mag_mean"),
         F.stddev_pop("acc_magnitude").alias("FE_acc_mag_std"),
         F.max("acc_magnitude").alias("FE_acc_mag_max"),
         F.expr("percentile_approx(acc_magnitude, 0.95)").alias("FE_acc_mag_p95"),
-
         # Axis-level acceleration
         F.avg("acceleration_x").alias("FE_acc_x_mean"),
         F.avg("acceleration_y").alias("FE_acc_y_mean"),
@@ -1189,20 +1194,18 @@ def run_pipeline():
         F.stddev_pop("acceleration_x").alias("FE_acc_x_std"),
         F.stddev_pop("acceleration_y").alias("FE_acc_y_std"),
         F.stddev_pop("acceleration_z").alias("FE_acc_z_std"),
-
         # Jerk
         F.expr("percentile_approx(jerk, 0.50)").alias("FE_jerk_med"),
         F.expr("percentile_approx(jerk, 0.95)").alias("FE_jerk_p95"),
-
         # Gyro magnitude
         F.avg("gyro_magnitude").alias("FE_gyro_mag_mean"),
         F.stddev_pop("gyro_magnitude").alias("FE_gyro_mag_std"),
         F.expr("percentile_approx(gyro_magnitude, 0.95)").alias("FE_gyro_mag_p95"),
-
         # Turning
         F.stddev_pop("bearing_diff_deg").alias("FE_turn_delta_std_deg"),
-        F.expr("percentile_approx(turn_rate_deg_s, 0.50)").alias("FE_turn_rate_med_deg_s"),
-
+        F.expr("percentile_approx(turn_rate_deg_s, 0.50)").alias(
+            "FE_turn_rate_med_deg_s"
+        ),
         # GPS accuracy
         F.avg("accuracy").alias("FE_gps_acc_mean"),
         F.stddev_pop("accuracy").alias("FE_gps_acc_std"),
@@ -1213,14 +1216,18 @@ def run_pipeline():
         "FE_sampling_rate_hz",
         F.when(
             F.col("FE_trip_duration_s") > 0,
-            F.col("FE_n_samples") / F.col("FE_trip_duration_s")
-        )
+            F.col("FE_n_samples") / F.col("FE_trip_duration_s"),
+        ),
     )
 
     print("Cell F3 complete — core FE_ features computed per booking_id.")
     trip_features.select(
-        "booking_id", "FE_n_samples", "FE_trip_duration_s",
-        "FE_sampling_rate_hz", "FE_speed_mean", "FE_acc_mag_mean"
+        "booking_id",
+        "FE_n_samples",
+        "FE_trip_duration_s",
+        "FE_sampling_rate_hz",
+        "FE_speed_mean",
+        "FE_acc_mag_mean",
     ).show(10, truncate=False)
 
     """
@@ -1236,38 +1243,29 @@ def run_pipeline():
     per-trip feature table ready for downstream ML / DW loading.
     """
 
-
     # Windows for first and last sample per trip
     w_first = Window.partitionBy("booking_id").orderBy("second")
-    w_last  = Window.partitionBy("booking_id").orderBy(F.col("second").desc())
+    w_last = Window.partitionBy("booking_id").orderBy(F.col("second").desc())
 
     # Attach row numbers for first/last detection
-    df_start_end = (
-        dfc
-        .withColumn("rn_first", F.row_number().over(w_first))
-        .withColumn("rn_last",  F.row_number().over(w_last))
+    df_start_end = dfc.withColumn("rn_first", F.row_number().over(w_first)).withColumn(
+        "rn_last", F.row_number().over(w_last)
     )
 
     # Start speed per trip (earliest second)
-    start_speed_df = (
-        df_start_end
-        .filter(F.col("rn_first") == 1)
-        .select("booking_id", F.col("speed").alias("FE_start_speed"))
+    start_speed_df = df_start_end.filter(F.col("rn_first") == 1).select(
+        "booking_id", F.col("speed").alias("FE_start_speed")
     )
 
     # End speed per trip (latest second)
-    end_speed_df = (
-        df_start_end
-        .filter(F.col("rn_last") == 1)
-        .select("booking_id", F.col("speed").alias("FE_end_speed"))
+    end_speed_df = df_start_end.filter(F.col("rn_last") == 1).select(
+        "booking_id", F.col("speed").alias("FE_end_speed")
     )
 
     # Join onto existing trip-level features
-    trip_features = (
-        trip_features
-        .join(start_speed_df, on="booking_id", how="left")
-        .join(end_speed_df,  on="booking_id", how="left")
-    )
+    trip_features = trip_features.join(
+        start_speed_df, on="booking_id", how="left"
+    ).join(end_speed_df, on="booking_id", how="left")
 
     print("Cell F4 complete — final trip-level feature table ready.")
     trip_features.show(10, truncate=False)
@@ -1294,7 +1292,6 @@ def run_pipeline():
     - Pandas is only used for small display tables.
     """
 
-
     # ---------------------------------------------------------------------
     # 0. Sanity check
     # ---------------------------------------------------------------------
@@ -1309,55 +1306,53 @@ def run_pipeline():
 
     print(f"[AFTER] Shape = ({after_rows:,}, {after_cols})")
 
-
     # ---------------------------------------------------------------------
     # 2. Missing values per column (Spark → small pandas for display)
     # ---------------------------------------------------------------------
-    missing_df = df_clean.select([
-        F.count(F.when(F.col(c).isNull(), 1)).alias(c)
-        for c in df_clean.columns
-    ])
+    missing_df = df_clean.select(
+        [F.count(F.when(F.col(c).isNull(), 1)).alias(c) for c in df_clean.columns]
+    )
 
     missing_pdf = (
         missing_df.toPandas()
-        .T
-        .reset_index()
+        .T.reset_index()
         .rename(columns={"index": "Column", 0: "Missing Count"})
     )
-    missing_pdf["Missing %"] = (
-        missing_pdf["Missing Count"] / after_rows * 100
-    ).round(2)
+    missing_pdf["Missing %"] = (missing_pdf["Missing Count"] / after_rows * 100).round(
+        2
+    )
 
     print("\n[AFTER] Missing value summary:")
     print(missing_pdf.head(12))
 
-
     # ---------------------------------------------------------------------
     # 3. Dtype snapshot
     # ---------------------------------------------------------------------
-    dtype_pdf = pd.DataFrame(
-        df_clean.dtypes, columns=["Column", "Spark DataType"]
-    )
+    dtype_pdf = pd.DataFrame(df_clean.dtypes, columns=["Column", "Spark DataType"])
 
     print("\n[AFTER] Dtype snapshot:")
     print(dtype_pdf)
-
 
     # ---------------------------------------------------------------------
     # 4. Duplicate count (full-row equality)
     # ---------------------------------------------------------------------
     after_dups = after_rows - df_clean.dropDuplicates().count()
 
-    dup_summary_pdf = pd.DataFrame([{
-        "Total Rows": after_rows,
-        "Duplicate Count": after_dups,
-        "Duplicate %": round(after_dups / after_rows * 100, 5) if after_rows else 0,
-        "Status": "Duplicates Found" if after_dups > 0 else "No Duplicates",
-    }])
+    dup_summary_pdf = pd.DataFrame(
+        [
+            {
+                "Total Rows": after_rows,
+                "Duplicate Count": after_dups,
+                "Duplicate %": round(after_dups / after_rows * 100, 5)
+                if after_rows
+                else 0,
+                "Status": "Duplicates Found" if after_dups > 0 else "No Duplicates",
+            }
+        ]
+    )
 
     print("\n[AFTER] Duplicate summary:")
     print(dup_summary_pdf)
-
 
     # ---------------------------------------------------------------------
     # 5. (Optional) Persist Cleaned Data — choose one
@@ -1369,27 +1364,22 @@ def run_pipeline():
     #   "mysql"   → write to MySQL DW using JDBC (requires MySQL JAR on Spark classpath)
     # ---------------------------------------------------------------------
 
-    SAVE_TO = None      # "parquet", "csv", or "mysql"
-    SAVE_PATH = "/content/df_clean"   # local path (Colab). Adjust if needed.
+    SAVE_TO = None  # "parquet", "csv", or "mysql"
+    SAVE_PATH = "/content/df_clean"  # local path (Colab). Adjust if needed.
 
     if SAVE_TO == "parquet":
-        (df_clean.write
-            .mode("overwrite")
-            .parquet(SAVE_PATH))
+        (df_clean.write.mode("overwrite").parquet(SAVE_PATH))
         print(f"\n[WRITE] Saved cleaned dataset to Parquet → {SAVE_PATH}")
 
     elif SAVE_TO == "csv":
-        (df_clean.write
-            .mode("overwrite")
-            .option("header", True)
-            .csv(SAVE_PATH))
+        (df_clean.write.mode("overwrite").option("header", True).csv(SAVE_PATH))
         print(f"\n[WRITE] Saved cleaned dataset to CSV folder → {SAVE_PATH}")
 
     elif SAVE_TO == "mysql":
         # --- DW / warehouse config (same RDS host, different schema) ---
         dw_host = os.getenv("DW_DB_HOST")
         dw_port = int(os.getenv("DW_DB_PORT", "3306"))
-        dw_name = os.getenv("DW_DB_NAME", "warehouse")   # your DW schema
+        dw_name = os.getenv("DW_DB_NAME", "warehouse")  # your DW schema
         dw_user = os.getenv("DW_DB_USER")
         dw_pass = os.getenv("DW_DB_PASSWORD")
 
@@ -1420,15 +1410,16 @@ def run_pipeline():
         print("  URL   :", jdbc_url)
         print("  Table :", dw_table)
 
-        (df_clean.write
-            .format("jdbc")
+        (
+            df_clean.write.format("jdbc")
             .option("url", jdbc_url)
             .option("dbtable", dw_table)
             .option("user", dw_user)
             .option("password", dw_pass)
             .option("driver", "com.mysql.cj.jdbc.Driver")
             .mode("append")
-            .save())
+            .save()
+        )
 
         print("[WRITE] df_clean successfully appended to MySQL DW.")
 
@@ -1468,7 +1459,6 @@ def run_pipeline():
         If set, override the default DW connection and table.
     """
 
-
     # ---------------------------------------------------------------------
     # 0. Basic checks & DW config
     # ---------------------------------------------------------------------
@@ -1486,7 +1476,6 @@ def run_pipeline():
             "This usually means C8 did not run successfully."
         )
 
-
     if "booking_id" not in trip_features.columns:
         raise ValueError(
             "[C11] ERROR: 'booking_id' column is missing from trip_features. "
@@ -1500,6 +1489,7 @@ def run_pipeline():
     DW_PORT = int(os.getenv("DW_PORT", db_port))
     DW_DB = os.getenv("DW_DB", "warehouse")
     DW_TABLE = os.getenv("DW_TABLE", "Dim_Sensor")  # must match your DW DDL
+    quoted_dw_table = quote_qualified_identifier(DW_DB, DW_TABLE)
 
     print(f"[C11] DW target: {DW_HOST}:{DW_PORT}/{DW_DB}.{DW_TABLE}")
 
@@ -1530,8 +1520,7 @@ def run_pipeline():
         )
 
     raw_base = (
-        df_source
-        .select(raw_cols_required)
+        df_source.select(raw_cols_required)
         .withColumn("booking_id", F.col("booking_id").cast("bigint"))
         .withColumn("accuracy", F.col("accuracy").cast("double"))
         .withColumn("bearing", F.col("bearing").cast("double"))
@@ -1545,21 +1534,17 @@ def run_pipeline():
         .withColumn("speed", F.col("speed").cast("double"))
     )
 
-    raw_agg = (
-        raw_base
-        .groupBy("booking_id")
-        .agg(
-            F.avg("accuracy").alias("accuracy"),
-            F.avg("bearing").alias("bearing"),
-            F.avg("acceleration_x").alias("acceleration_x"),
-            F.avg("acceleration_y").alias("acceleration_y"),
-            F.avg("acceleration_z").alias("acceleration_z"),
-            F.avg("gyro_x").alias("gyro_x"),
-            F.avg("gyro_y").alias("gyro_y"),
-            F.avg("gyro_z").alias("gyro_z"),
-            F.max("second").cast("int").alias("second"),  # last second in trip
-            F.avg("speed").alias("speed"),                # average speed over trip
-        )
+    raw_agg = raw_base.groupBy("booking_id").agg(
+        F.avg("accuracy").alias("accuracy"),
+        F.avg("bearing").alias("bearing"),
+        F.avg("acceleration_x").alias("acceleration_x"),
+        F.avg("acceleration_y").alias("acceleration_y"),
+        F.avg("acceleration_z").alias("acceleration_z"),
+        F.avg("gyro_x").alias("gyro_x"),
+        F.avg("gyro_y").alias("gyro_y"),
+        F.avg("gyro_z").alias("gyro_z"),
+        F.max("second").cast("int").alias("second"),  # last second in trip
+        F.avg("speed").alias("speed"),  # average speed over trip
     )
 
     print("[C11] raw_agg columns:", raw_agg.columns)
@@ -1571,9 +1556,8 @@ def run_pipeline():
         "booking_id", F.col("booking_id").cast("bigint")
     )
 
-    trip_export = (
-        trip_base.alias("fe")
-        .join(raw_agg.alias("raw"), on="booking_id", how="left")
+    trip_export = trip_base.alias("fe").join(
+        raw_agg.alias("raw"), on="booking_id", how="left"
     )
 
     print("[C11] trip_export columns after join:", trip_export.columns)
@@ -1627,9 +1611,13 @@ def run_pipeline():
     for col_name in numeric_cols:
         if col_name in trip_export.columns:
             if col_name in ["second", "FE_n_samples", "FE_trip_duration_s"]:
-                trip_export = trip_export.withColumn(col_name, F.col(col_name).cast("int"))
+                trip_export = trip_export.withColumn(
+                    col_name, F.col(col_name).cast("int")
+                )
             else:
-                trip_export = trip_export.withColumn(col_name, F.col(col_name).cast("double"))
+                trip_export = trip_export.withColumn(
+                    col_name, F.col(col_name).cast("double")
+                )
 
     trip_export = trip_export.withColumn("date_cleaned", F.current_timestamp())
 
@@ -1684,12 +1672,19 @@ def run_pipeline():
     # Ensure all expected columns exist (add NULLs if missing, just in case)
     for col_name in dim_sensor_cols:
         if col_name not in trip_export.columns:
-            if col_name in ["booking_id", "FE_n_samples", "FE_trip_duration_s", "second"]:
+            if col_name in [
+                "booking_id",
+                "FE_n_samples",
+                "FE_trip_duration_s",
+                "second",
+            ]:
                 trip_export = trip_export.withColumn(col_name, F.lit(None).cast("int"))
             elif col_name == "date_cleaned":
                 trip_export = trip_export.withColumn(col_name, F.current_timestamp())
             else:
-                trip_export = trip_export.withColumn(col_name, F.lit(None).cast("double"))
+                trip_export = trip_export.withColumn(
+                    col_name, F.lit(None).cast("double")
+                )
 
     trip_export = trip_export.select(dim_sensor_cols)
     dw_cols = dim_sensor_cols
@@ -1701,10 +1696,13 @@ def run_pipeline():
     placeholders = ", ".join(["%s"] * len(dw_cols))
     col_list = ", ".join(f"`{c}`" for c in dw_cols)
 
-    insert_sql = f"""
-        INSERT INTO {DW_DB}.{DW_TABLE} ({col_list})
-        VALUES ({placeholders})
-    """
+    insert_sql = sql_statement(
+        "INSERT INTO",
+        quoted_dw_table,
+        f"({col_list})",
+        "VALUES",
+        f"({placeholders})",
+    )
 
     # ---------------------------------------------------------------------
     # 6. Connect to DW and stream-insert in batches
@@ -1742,7 +1740,9 @@ def run_pipeline():
         dw_cur.executemany(insert_sql, batch)
         dw_conn.commit()
         total_inserted += len(batch)
-        print(f"[C11] Final batch inserted. Total rows inserted/updated: {total_inserted}")
+        print(
+            f"[C11] Final batch inserted. Total rows inserted/updated: {total_inserted}"
+        )
 
     dw_cur.close()
     dw_conn.close()
@@ -1768,29 +1768,34 @@ def run_pipeline():
         total_updated = 0
 
         for i in range(0, len(booking_ids), chunk_size):
-            chunk = booking_ids[i: i + chunk_size]
+            chunk = booking_ids[i : i + chunk_size]
             placeholders = ", ".join(["%s"] * len(chunk))
 
-            sql = f"""
-                UPDATE {db_table}   -- sensor_data_source
-                SET cleaned_date = NOW()
-                WHERE booking_id IN ({placeholders})
-            """
+            sql = sql_statement(
+                "UPDATE",
+                quoted_db_table,
+                "SET cleaned_date = NOW()",
+                "WHERE booking_id IN",
+                f"({placeholders})",
+            )
 
             staging_cur.execute(sql, chunk)
             staging_conn.commit()
             total_updated += staging_cur.rowcount
-            print(f"[C11] Staging UPDATE chunk done, cumulative updated: {total_updated}")
+            print(
+                f"[C11] Staging UPDATE chunk done, cumulative updated: {total_updated}"
+            )
 
         staging_cur.close()
         staging_conn.close()
         print(
-            f"[C11] Staging update complete — cleaned_date set for ~{total_updated} rows "
-            f"in '{db_table}'."
+            "[C11] Staging update complete — cleaned_date set for approximately",
+            total_updated,
+            "rows in",
+            repr(db_table),
         )
     else:
         print("[C11] No booking_ids collected — staging.cleaned_date not updated.")
-
 
 
 def main():
